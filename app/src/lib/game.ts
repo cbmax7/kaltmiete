@@ -31,7 +31,12 @@ export type Mode = 'precision' | 'streak';
 export const PRECISION_ROUNDS = 6;
 export const PRECISION_SECONDS = 10;
 export const STREAK_LENGTH = 20;
-export const STREAK_SECONDS = 5;
+/**
+ * 5s proved unplayable in testing: reading a new flat's district, size and
+ * quality badge takes most of it, and with only 2 lives a pair of hesitations
+ * ends the run before it starts. 8s still feels like a sprint.
+ */
+export const STREAK_SECONDS = 8;
 export const STREAK_LIVES = 2;
 
 /** Flats this far from the median €/m² are worth more — the market's genuine oddities. */

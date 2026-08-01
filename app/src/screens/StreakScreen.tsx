@@ -23,13 +23,24 @@ interface Props {
 
 const REVEAL_MS = 1600;
 
+const roomLabel = (rooms: number) => (rooms % 1 === 0 ? `${rooms}` : rooms.toFixed(1));
+
+const describe = (listing: Listing) =>
+  `${listing.district} · ${listing.space}m² · ${roomLabel(listing.rooms)}Z`;
+
 export const StreakScreen = ({ deck, onFinish, onQuit }: Props) => {
+  // The first flat is orientation, not a question — you cannot compare against a
+  // price you have never seen. The clock only starts once it has been read.
+  const [started, setStarted] = useState(false);
   const [index, setIndex] = useState(1);
   const [turns, setTurns] = useState<StreakTurn[]>([]);
   const [lives, setLives] = useState(STREAK_LIVES);
   const [streak, setStreak] = useState(0);
   const [revealed, setRevealed] = useState<StreakTurn | null>(null);
+
   const advance = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** State updates are async, so a ref guards against the timer and a tap both landing. */
+  const answering = useRef(false);
 
   const previous = deck[index - 1];
   const current = deck[index];
@@ -39,7 +50,8 @@ export const StreakScreen = ({ deck, onFinish, onQuit }: Props) => {
 
   const answer = useCallback(
     (call: Call | null) => {
-      if (revealed || !current) return;
+      if (answering.current || !current) return;
+      answering.current = true;
 
       const turn = resolveCall(previous, current, call, streak);
       const nextTurns = [...turns, turn];
@@ -56,16 +68,54 @@ export const StreakScreen = ({ deck, onFinish, onQuit }: Props) => {
           onFinish(nextTurns, nextLives > 0 && isLastFlat);
           return;
         }
+        answering.current = false;
         setRevealed(null);
         setIndex(index + 1);
       }, REVEAL_MS);
     },
-    [revealed, current, previous, streak, turns, lives, index, deck.length, onFinish],
+    [current, previous, streak, turns, lives, index, deck.length, onFinish],
   );
 
   if (!current) return null;
 
   const multiplier = streakMultiplier(streak);
+
+  if (!started) {
+    const first = deck[0];
+    return (
+      <View style={styles.wrap}>
+        <View style={styles.header}>
+          <Pressable onPress={onQuit} hitSlop={12}>
+            <Text style={styles.quit}>Exit</Text>
+          </Pressable>
+          <Text style={styles.introKicker}>Your starting flat</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+
+        <View style={styles.card}>
+          <ListingCard listing={first} compact />
+        </View>
+
+        <View style={styles.reference}>
+          <Text style={styles.referenceLabel} numberOfLines={1}>
+            {describe(first)}
+          </Text>
+          <Text style={styles.referencePrice}>{euro(first.cold_rent)}</Text>
+        </View>
+
+        <Text style={styles.introHint}>
+          Every next flat is matched on size, so only the district and quality tell you
+          anything. {STREAK_SECONDS} seconds per call.
+        </Text>
+
+        <View style={styles.actions}>
+          <Pressable style={styles.start} onPress={() => setStarted(true)}>
+            <Text style={styles.startText}>Start</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.wrap}>
@@ -102,61 +152,62 @@ export const StreakScreen = ({ deck, onFinish, onQuit }: Props) => {
         )}
       </View>
 
-      {/* The flat you already know the price of */}
-      <View style={styles.anchor}>
-        <View style={styles.anchorMain}>
-          <Text style={styles.anchorLabel}>Previous</Text>
-          <Text style={styles.anchorPlace} numberOfLines={1}>
-            {previous.district} · {previous.space}m² · {previous.rooms}Z
-          </Text>
-        </View>
-        <Text style={styles.anchorRent}>{euro(previous.cold_rent)}</Text>
-      </View>
-
       <View style={styles.card}>
         <ListingCard listing={current} compact />
       </View>
 
       {revealed ? (
-        <View
-          style={[
-            styles.result,
-            { borderColor: revealed.correct ? colors.accent : colors.over },
-          ]}
-        >
-          <View>
-            <Text
-              style={[
-                styles.resultVerdict,
-                { color: revealed.correct ? colors.accent : colors.over },
-              ]}
-            >
-              {revealed.call === null
-                ? 'Out of time'
-                : revealed.correct
-                  ? 'Correct'
-                  : 'Wrong'}
-            </Text>
-            <Text style={styles.resultGap}>{Math.round(revealed.gapPct)}% apart</Text>
+        <>
+          <View
+            style={[
+              styles.result,
+              { borderColor: revealed.correct ? colors.accent : colors.over },
+            ]}
+          >
+            <View>
+              <Text
+                style={[
+                  styles.resultVerdict,
+                  { color: revealed.correct ? colors.accent : colors.over },
+                ]}
+              >
+                {revealed.call === null
+                  ? 'Out of time'
+                  : revealed.correct
+                    ? 'Correct'
+                    : 'Wrong'}
+              </Text>
+              <Text style={styles.resultGap}>{Math.round(revealed.gapPct)}% apart</Text>
+            </View>
+            <View style={styles.resultRight}>
+              <Text style={styles.resultRent}>{euro(current.cold_rent)}</Text>
+              {revealed.points > 0 ? (
+                <Text style={styles.resultPoints}>+{revealed.points}</Text>
+              ) : null}
+            </View>
           </View>
-          <View style={styles.resultRight}>
-            <Text style={styles.resultRent}>{euro(current.cold_rent)}</Text>
-            {revealed.points > 0 ? (
-              <Text style={styles.resultPoints}>+{revealed.points}</Text>
-            ) : null}
-          </View>
-        </View>
+        </>
       ) : (
-        <View style={styles.actions}>
-          <Pressable style={[styles.action, styles.lower]} onPress={() => answer('lower')}>
-            <MaterialCommunityIcons name="arrow-down-bold" size={20} color={colors.under} />
-            <Text style={[styles.actionText, { color: colors.under }]}>Lower</Text>
-          </Pressable>
-          <Pressable style={[styles.action, styles.higher]} onPress={() => answer('higher')}>
-            <MaterialCommunityIcons name="arrow-up-bold" size={20} color={colors.bg} />
-            <Text style={[styles.actionText, { color: colors.bg }]}>Higher</Text>
-          </Pressable>
-        </View>
+        <>
+          {/* The number you are judging against sits directly above the buttons. */}
+          <View style={styles.reference}>
+            <Text style={styles.referenceLabel} numberOfLines={1}>
+              Higher or lower than {previous.district}?
+            </Text>
+            <Text style={styles.referencePrice}>{euro(previous.cold_rent)}</Text>
+          </View>
+
+          <View style={styles.actions}>
+            <Pressable style={[styles.action, styles.lower]} onPress={() => answer('lower')}>
+              <MaterialCommunityIcons name="arrow-down-bold" size={20} color={colors.under} />
+              <Text style={[styles.actionText, { color: colors.under }]}>Lower</Text>
+            </Pressable>
+            <Pressable style={[styles.action, styles.higher]} onPress={() => answer('higher')}>
+              <MaterialCommunityIcons name="arrow-up-bold" size={20} color={colors.bg} />
+              <Text style={[styles.actionText, { color: colors.bg }]}>Higher</Text>
+            </Pressable>
+          </View>
+        </>
       )}
     </View>
   );
@@ -177,6 +228,23 @@ const styles = StyleSheet.create({
     color: colors.muted,
     textTransform: 'uppercase',
     width: 60,
+  },
+  headerSpacer: {
+    width: 60,
+  },
+  introKicker: {
+    ...type.label,
+    color: colors.accent,
+    textTransform: 'uppercase',
+  },
+  introHint: {
+    ...type.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.muted,
+    textAlign: 'center',
+    paddingHorizontal: space.lg,
+    marginTop: space.md,
   },
   lives: {
     flexDirection: 'row',
@@ -217,41 +285,37 @@ const styles = StyleSheet.create({
   timerPlaceholder: {
     height: 4,
   },
-  anchor: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginHorizontal: space.lg,
-    marginTop: space.sm,
-    padding: space.sm + 4,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceRaised,
-  },
-  anchorMain: {
-    flex: 1,
-  },
-  anchorLabel: {
-    ...type.label,
-    fontSize: 9,
-    color: colors.muted,
-    textTransform: 'uppercase',
-  },
-  anchorPlace: {
-    ...type.body,
-    fontSize: 13,
-    color: colors.text,
-    marginTop: 2,
-  },
-  anchorRent: {
-    ...type.heading,
-    color: colors.accent,
-    fontVariant: ['tabular-nums'],
-  },
   card: {
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: space.lg,
     paddingVertical: space.sm,
+  },
+  reference: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.md,
+    marginHorizontal: space.lg,
+    marginBottom: space.sm + 2,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm + 4,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  referenceLabel: {
+    ...type.body,
+    fontSize: 13,
+    color: colors.muted,
+    flex: 1,
+  },
+  referencePrice: {
+    ...type.title,
+    fontSize: 30,
+    color: colors.accent,
+    fontVariant: ['tabular-nums'],
   },
   actions: {
     flexDirection: 'row',
@@ -277,6 +341,17 @@ const styles = StyleSheet.create({
   },
   actionText: {
     ...type.heading,
+  },
+  start: {
+    flex: 1,
+    backgroundColor: colors.accent,
+    borderRadius: radius.pill,
+    paddingVertical: space.md + 4,
+    alignItems: 'center',
+  },
+  startText: {
+    ...type.heading,
+    color: colors.bg,
   },
   result: {
     flexDirection: 'row',
