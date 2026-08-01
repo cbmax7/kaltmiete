@@ -10,3 +10,7 @@ web-build/
 # Personal working notes — not part of the deliverable
 HACKATHON.md
 BRAINSTORM.md
+
+# Browser-testing artifacts
+.playwright-mcp/
+start.png
