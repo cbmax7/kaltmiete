@@ -29,7 +29,8 @@ export interface Listing {
 export type Mode = 'precision' | 'streak';
 
 export const PRECISION_ROUNDS = 6;
-export const PRECISION_SECONDS = 10;
+/** Dragging a slider to a considered value eats most of a shorter clock. */
+export const PRECISION_SECONDS = 12;
 export const STREAK_LENGTH = 20;
 /**
  * 5s proved unplayable in testing: reading a new flat's district, size and
