@@ -45,6 +45,9 @@ export const Reveal = ({ round, isLast, onNext }: Props) => {
 
   return (
     <View style={styles.wrap}>
+      <Text style={styles.context} numberOfLines={1}>
+        {listing.district} · {listing.space}m² · {listing.rooms % 1 === 0 ? listing.rooms : listing.rooms.toFixed(1)} Zimmer
+      </Text>
       <Text style={styles.kicker}>Actual Kaltmiete</Text>
       <Text style={styles.price}>{euro(shown)}</Text>
 
@@ -94,6 +97,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: space.lg,
+  },
+  context: {
+    ...type.heading,
+    color: colors.text,
+    marginBottom: space.lg,
   },
   kicker: {
     ...type.label,

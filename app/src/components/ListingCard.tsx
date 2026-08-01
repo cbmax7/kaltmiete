@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
   },
   photoWrap: {
     position: 'relative',
-    aspectRatio: 4 / 3,
+    aspectRatio: 3 / 2,
     backgroundColor: colors.surfaceRaised,
   },
   photo: {

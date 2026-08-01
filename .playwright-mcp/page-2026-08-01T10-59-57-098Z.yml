@@ -1,0 +1,19 @@
+- generic [ref=e5]:
+  - generic [ref=e6]:
+    - generic [ref=e7]: Berlin · Wohnung mieten
+    - generic [ref=e8]: KALT
+    - generic [ref=e9]: MIETE
+    - generic [ref=e10]: How out of touch are you with what Berlin actually costs?
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]: Real listings in the deck
+        - generic [ref=e15]: "30"
+      - generic [ref=e16]:
+        - generic [ref=e17]: Median asking price
+        - generic [ref=e18]: €22.8/m²
+      - generic [ref=e19]:
+        - generic [ref=e20]: Flats per round
+        - generic [ref=e21]: "6"
+    - generic [ref=e22] [cursor=pointer]: Guess the rent
+    - generic [ref=e24]: Live listings scraped from ImmobilienScout24. No accounts, no tracking, works offline.
