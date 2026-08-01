@@ -16,7 +16,7 @@ import urllib.request
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-DATASET_ID = "gPxxBFcjuof0d9bPF"
+DATASET_ID = "B5WeoIlG49mV9VTXx"
 DATASET_URL = f"https://api.apify.com/v2/datasets/{DATASET_ID}/items?clean=true"
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,8 +28,23 @@ IMAGE_MAP_PATH = APP / "src" / "data" / "images.ts"
 # Guessable, non-degenerate listings only.
 MIN_SPACE, MAX_SPACE = 15, 200
 MIN_RENT, MAX_RENT = 200, 6000
-TARGET_DECK_SIZE = 30
+TARGET_DECK_SIZE = 300
 IMAGE_SIZE = "800x600"
+
+# Furnished flats rent for roughly double in Berlin but carry no data field,
+# so the signal has to come out of the listing copy.
+FURNISHED_RE = re.compile(
+    r"m[oö]bl|furnish|serviced\s+apartment|vollausgestattet|all[-\s]?inclusive|wohnen\s+auf\s+zeit",
+    re.IGNORECASE,
+)
+FLOORPLAN_RE = re.compile(r"grundriss|floor\s*plan", re.IGNORECASE)
+
+INTERIOR_QUALITY = {
+    "luxury": "Luxus",
+    "sophisticated": "Gehoben",
+    "normal": "Normal",
+    "simple": "Einfach",
+}
 
 
 @dataclass
@@ -42,47 +57,56 @@ class Listing:
     cold_rent: int
     warm_rent: int | None
     per_sqm: float
+    floor: int | None
+    floors_total: int | None
     year: int | None
+    condition: str | None
+    quality: str | None
     balcony: bool
     kitchen: bool
     garden: bool
+    lift: bool
+    cellar: bool
+    furnished: bool
+    new_build: bool
+    high_demand: bool
+    fair_price: str | None
     url: str
 
 
 def fetch_raw() -> list[dict]:
-    with urllib.request.urlopen(DATASET_URL, timeout=60) as response:
+    with urllib.request.urlopen(DATASET_URL, timeout=180) as response:
         return json.load(response)
 
 
-def split_quarter(quarter: str) -> tuple[str, str]:
-    """'Britz (Neukölln)' -> ('Britz', 'Neukölln'). Falls back to the raw value."""
-    match = re.match(r"^(.*?)\s*\((.*?)\)\s*$", quarter or "")
-    if match:
-        return match.group(1).strip(), match.group(2).strip()
-    cleaned = (quarter or "Berlin").strip()
-    return cleaned, cleaned
-
-
-def first_photo_url(estate: dict) -> str | None:
-    attachments = estate.get("galleryAttachments", {}).get("attachment")
-    if isinstance(attachments, dict):
-        attachments = [attachments]
-    for attachment in attachments or []:
-        if attachment.get("floorplan") == "true":
-            continue
-        urls = attachment.get("urls") or []
-        for entry in urls:
-            url = entry.get("url")
-            candidates = [url] if isinstance(url, dict) else (url or [])
-            for candidate in candidates:
-                href = candidate.get("@href")
-                if href:
-                    return href.replace("%WIDTH%x%HEIGHT%", IMAGE_SIZE)
-    return None
-
-
 def as_bool(value) -> bool:
-    return str(value).lower() == "true"
+    return str(value).lower() in {"y", "true", "yes"}
+
+
+def tidy_region(value: str | None) -> str:
+    """'Friedrichshain_Kreuzberg' -> 'Friedrichshain-Kreuzberg'."""
+    return (value or "").replace("_", "-").strip()
+
+
+def tidy_place(value: str | None) -> str:
+    """Strip the administrative suffixes ImmoScout appends: 'Mitte (Ortsteil)' -> 'Mitte'."""
+    cleaned = re.sub(
+        r"(?:\s*\(|[-\s])(?:Ortsteil|Bezirk|Stadt)\)?\s*$", "", (value or "").strip()
+    )
+    return cleaned or ""
+
+
+def photo_url(normalized: dict) -> str | None:
+    for item in normalized.get("media") or []:
+        if item.get("type") != "PICTURE":
+            continue
+        caption = item.get("caption") or ""
+        url = item.get("url")
+        if not url or FLOORPLAN_RE.search(caption) or FLOORPLAN_RE.search(url):
+            continue
+        # The scraper hands back a 1500x1000 render; a smaller one keeps the bundle sane.
+        return re.sub(r"/resize/\d+x\d+/", f"/resize/{IMAGE_SIZE}/", url)
+    return None
 
 
 def normalise(raw: list[dict]) -> list[tuple[Listing, str]]:
@@ -90,13 +114,12 @@ def normalise(raw: list[dict]) -> list[tuple[Listing, str]]:
     results: list[tuple[Listing, str]] = []
 
     for item in raw:
-        estate = item.get("resultlist.realEstate")
-        if not estate:
-            continue
+        normalized = item.get("normalized") or {}
+        ads = item.get("adTargetingParameters") or {}
 
-        cold = estate.get("price", {}).get("value")
-        space = estate.get("livingSpace")
-        rooms = estate.get("numberOfRooms")
+        cold = (normalized.get("price") or {}).get("amount")
+        space = (normalized.get("area") or {}).get("livingSpace")
+        rooms = (normalized.get("rooms") or {}).get("total")
         if not cold or not space or not rooms:
             continue
         if not (MIN_SPACE <= space <= MAX_SPACE) or not (MIN_RENT <= cold <= MAX_RENT):
@@ -107,30 +130,46 @@ def normalise(raw: list[dict]) -> list[tuple[Listing, str]]:
         if fingerprint in seen:
             continue
 
-        photo = first_photo_url(estate)
+        photo = photo_url(normalized)
         if not photo:
             continue
 
-        district, borough = split_quarter(estate.get("address", {}).get("quarter", ""))
-        warm = estate.get("calculatedTotalRent", {}).get("totalRent", {}).get("value")
-        year = estate.get("constructionYear")
+        address = normalized.get("address") or {}
+        construction = normalized.get("construction") or {}
+        floor = normalized.get("floor") or {}
+
+        district = tidy_place(address.get("city")) or tidy_place(tidy_region(ads.get("obj_regio4"))) or "Berlin"
+        borough = tidy_place(tidy_region(ads.get("obj_regio3"))) or district
+
+        blurb = f"{normalized.get('title') or ''} {normalized.get('description') or ''}"
+        warm = ads.get("obj_totalRent")
 
         seen.add(fingerprint)
         results.append((
             Listing(
-                id=str(estate.get("@id") or item.get("realEstateId")),
+                id=str(normalized.get("listingId") or ads.get("obj_scoutId")),
                 district=district,
                 borough=borough,
                 rooms=float(rooms),
                 space=round(space),
                 cold_rent=round(cold),
-                warm_rent=round(warm) if warm else None,
+                warm_rent=round(float(warm)) if warm else None,
                 per_sqm=round(cold / space, 1),
-                year=int(year) if year else None,
-                balcony=as_bool(estate.get("balcony")),
-                kitchen=as_bool(estate.get("builtInKitchen")),
-                garden=as_bool(estate.get("garden")),
-                url=item.get("link", ""),
+                floor=floor.get("current"),
+                floors_total=floor.get("total"),
+                year=construction.get("yearBuilt"),
+                condition=construction.get("condition"),
+                quality=INTERIOR_QUALITY.get(ads.get("obj_interiorQual") or ""),
+                balcony=as_bool(ads.get("obj_balcony")),
+                kitchen=as_bool(ads.get("obj_hasKitchen")),
+                garden=as_bool(ads.get("obj_garden")),
+                lift=as_bool(ads.get("obj_lift")),
+                cellar=as_bool(ads.get("obj_cellar")),
+                furnished=bool(FURNISHED_RE.search(blurb)),
+                new_build=as_bool(ads.get("obj_newlyConst")),
+                high_demand=as_bool(ads.get("obj_highDemand")),
+                fair_price=(normalized.get("fairPrice") or {}).get("label"),
+                url=normalized.get("url") or "",
             ),
             photo,
         ))
@@ -142,7 +181,7 @@ def download_images(entries: list[tuple[Listing, str]]) -> list[Listing]:
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     kept: list[Listing] = []
 
-    for listing, photo in entries:
+    for index, (listing, photo) in enumerate(entries, 1):
         target = IMAGE_DIR / f"{listing.id}.webp"
         if not target.exists():
             try:
@@ -153,18 +192,27 @@ def download_images(entries: list[tuple[Listing, str]]) -> list[Listing]:
                 print(f"  ! skipped {listing.id}: {error}")
                 continue
         kept.append(listing)
+        if index % 50 == 0:
+            print(f"  {index}/{len(entries)}")
 
     return kept
+
+
+def prune_orphan_images(listings: list[Listing]) -> None:
+    """Drop photos left behind by earlier, larger builds."""
+    live = {f"{listing.id}.webp" for listing in listings}
+    for path in IMAGE_DIR.glob("*.webp"):
+        if path.name not in live:
+            path.unlink()
 
 
 def write_outputs(listings: list[Listing]) -> None:
     DECK_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    per_sqm_values = [listing.per_sqm for listing in listings]
     deck = {
         "city": "Berlin",
         "source": "ImmobilienScout24 via Apify",
-        "medianPerSqm": round(statistics.median(per_sqm_values), 1),
+        "medianPerSqm": round(statistics.median(l.per_sqm for l in listings), 1),
         "medianColdRent": round(statistics.median(l.cold_rent for l in listings)),
         "listings": [asdict(listing) for listing in listings],
     }
@@ -195,10 +243,19 @@ def main() -> None:
 
     print("Downloading photos…")
     listings = download_images(entries)
+    prune_orphan_images(listings)
 
     write_outputs(listings)
+
+    furnished = sum(1 for l in listings if l.furnished)
+    with_floor = sum(1 for l in listings if l.floor is not None)
+    with_quality = sum(1 for l in listings if l.quality)
+
     print(f"\nDeck built: {len(listings)} listings")
-    print(f"  median €/m²  {statistics.median(l.per_sqm for l in listings)}")
+    print(f"  median €/m²   {statistics.median(l.per_sqm for l in listings)}")
+    print(f"  möbliert      {furnished} ({furnished / len(listings) * 100:.0f}%)")
+    print(f"  with floor    {with_floor} ({with_floor / len(listings) * 100:.0f}%)")
+    print(f"  with quality  {with_quality} ({with_quality / len(listings) * 100:.0f}%)")
     print(f"  {DECK_PATH.relative_to(ROOT)}")
     print(f"  {IMAGE_MAP_PATH.relative_to(ROOT)}")
 

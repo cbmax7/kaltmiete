@@ -1,7 +1,9 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
-import { euro, roundVerdict, MEDIAN_PER_SQM, type Round } from '../lib/game';
+import { MEDIAN_PER_SQM, euro, isTricky, roundVerdict, type Round } from '../lib/game';
 import { colors, radius, space, type } from '../theme';
+import { floorLabel } from './ListingCard';
 
 interface Props {
   round: Round;
@@ -10,7 +12,7 @@ interface Props {
 }
 
 export const Reveal = ({ round, isLast, onNext }: Props) => {
-  const { listing, guess, biasPct, errorPct, points } = round;
+  const { listing, guess, biasPct, errorPct, points, timedOut } = round;
   const under = biasPct < 0;
 
   const counter = useRef(new Animated.Value(0)).current;
@@ -46,8 +48,9 @@ export const Reveal = ({ round, isLast, onNext }: Props) => {
   return (
     <View style={styles.wrap}>
       <Text style={styles.context} numberOfLines={1}>
-        {listing.district} · {listing.space}m² · {listing.rooms % 1 === 0 ? listing.rooms : listing.rooms.toFixed(1)} Zimmer
+        {listing.district} · {listing.space}m² · {floorLabel(listing)}
       </Text>
+
       <Text style={styles.kicker}>Actual Kaltmiete</Text>
       <Text style={styles.price}>{euro(shown)}</Text>
 
@@ -57,11 +60,22 @@ export const Reveal = ({ round, isLast, onNext }: Props) => {
             {Math.abs(Math.round(biasPct))}% {under ? 'under' : 'over'}
           </Text>
         </View>
-        <Text style={styles.guessText}>you said {euro(guess)}</Text>
+        <Text style={styles.guessText}>
+          {timedOut ? 'ran out of time on ' : 'you said '}
+          {euro(guess)}
+        </Text>
       </Animated.View>
 
       <Animated.View style={[styles.verdictBlock, slideIn]}>
-        <Text style={styles.verdict}>{roundVerdict(errorPct)}</Text>
+        <View>
+          <Text style={styles.verdict}>{roundVerdict(errorPct)}</Text>
+          {isTricky(listing) ? (
+            <View style={styles.trickyRow}>
+              <MaterialCommunityIcons name="star-four-points" size={11} color={colors.accent} />
+              <Text style={styles.tricky}>Tricky flat · 1.5×</Text>
+            </View>
+          ) : null}
+        </View>
         <Text style={styles.points}>+{points}</Text>
       </Animated.View>
 
@@ -73,7 +87,7 @@ export const Reveal = ({ round, isLast, onNext }: Props) => {
             <Text style={styles.factMuted}>
               {'  '}
               {vsMedian >= 0 ? '+' : ''}
-              {vsMedian}% vs city median
+              {vsMedian}% vs median
             </Text>
           </Text>
         </View>
@@ -81,6 +95,12 @@ export const Reveal = ({ round, isLast, onNext }: Props) => {
           <View style={styles.factRow}>
             <Text style={styles.factLabel}>Warm rent</Text>
             <Text style={styles.factValue}>{euro(listing.warm_rent)}</Text>
+          </View>
+        ) : null}
+        {listing.fair_price ? (
+          <View style={styles.factRow}>
+            <Text style={styles.factLabel}>ImmoScout verdict</Text>
+            <Text style={styles.factValue}>{listing.fair_price}</Text>
           </View>
         ) : null}
       </Animated.View>
@@ -132,10 +152,11 @@ const styles = StyleSheet.create({
   guessText: {
     ...type.body,
     color: colors.muted,
+    flex: 1,
   },
   verdictBlock: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: space.xl,
     paddingTop: space.lg,
@@ -145,6 +166,18 @@ const styles = StyleSheet.create({
   verdict: {
     ...type.title,
     color: colors.text,
+  },
+  trickyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  tricky: {
+    ...type.label,
+    fontSize: 10,
+    color: colors.accent,
+    textTransform: 'uppercase',
   },
   points: {
     ...type.title,
@@ -173,7 +206,7 @@ const styles = StyleSheet.create({
     color: colors.muted,
   },
   button: {
-    marginTop: space.xxl,
+    marginTop: space.xl,
     backgroundColor: colors.accent,
     borderRadius: radius.pill,
     paddingVertical: space.md + 2,
